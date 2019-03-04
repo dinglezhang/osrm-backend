@@ -9,11 +9,14 @@
 #include "osrm/trip_parameters.hpp"
 
 #include <exception>
+#include <sstream>
 #include <type_traits>
 #include <utility>
 
 #include "nodejs/node_osrm.hpp"
 #include "nodejs/node_osrm_support.hpp"
+
+#include "util/json_renderer.hpp"
 
 namespace node_osrm
 {
@@ -72,6 +75,7 @@ NAN_MODULE_INIT(Engine::Init)
  * @param {Boolean} [options.shared_memory] Connects to the persistent shared memory datastore.
  *        This requires you to run `osrm-datastore` prior to creating an `OSRM` object.
  * @param {String} [options.path] The path to the `.osrm` files. This is mutually exclusive with setting {options.shared_memory} to true.
+ * @param {String} [options.memory_file] Path to a file to store the memory using mmap.
  * @param {Number} [options.max_locations_trip] Max. locations supported in trip query (default: unlimited).
  * @param {Number} [options.max_locations_viaroute] Max. locations supported in viaroute query (default: unlimited).
  * @param {Number} [options.max_locations_distance_table] Max. locations supported in distance table query (default: unlimited).
@@ -121,6 +125,8 @@ inline void async(const Nan::FunctionCallbackInfo<v8::Value> &info,
     if (!params)
         return;
 
+    auto pluginParams = argumentsToPluginParameters(info);
+
     BOOST_ASSERT(params->IsValid());
 
     if (!info[info.Length() - 1]->IsFunction())
@@ -136,9 +142,89 @@ inline void async(const Nan::FunctionCallbackInfo<v8::Value> &info,
         Worker(std::shared_ptr<osrm::OSRM> osrm_,
                ParamPtr params_,
                ServiceMemFn service,
-               Nan::Callback *callback)
+               Nan::Callback *callback,
+               PluginParameters pluginParams_)
             : Base(callback), osrm{std::move(osrm_)}, service{std::move(service)},
-              params{std::move(params_)}
+              params{std::move(params_)}, pluginParams{std::move(pluginParams_)}
+        {
+        }
+
+        void Execute() override try
+        {
+            osrm::json::Object r;
+            const auto status = ((*osrm).*(service))(*params, r);
+            ParseResult(status, r);
+            if (pluginParams.renderJSONToBuffer)
+            {
+                std::ostringstream buf;
+                osrm::util::json::render(buf, r);
+                result = buf.str();
+            }
+            else
+            {
+                result = r;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            SetErrorMessage(e.what());
+        }
+
+        void HandleOKCallback() override
+        {
+            Nan::HandleScope scope;
+
+            const constexpr auto argc = 2u;
+            v8::Local<v8::Value> argv[argc] = {Nan::Null(), render(result)};
+
+            callback->Call(argc, argv);
+        }
+
+        // Keeps the OSRM object alive even after shutdown until we're done with callback
+        std::shared_ptr<osrm::OSRM> osrm;
+        ServiceMemFn service;
+        const ParamPtr params;
+        const PluginParameters pluginParams;
+
+        ObjectOrString result;
+    };
+
+    auto *callback = new Nan::Callback{info[info.Length() - 1].As<v8::Function>()};
+    Nan::AsyncQueueWorker(
+        new Worker{self->this_, std::move(params), service, callback, std::move(pluginParams)});
+}
+
+template <typename ParameterParser, typename ServiceMemFn>
+inline void asyncForTiles(const Nan::FunctionCallbackInfo<v8::Value> &info,
+                          ParameterParser argsToParams,
+                          ServiceMemFn service,
+                          bool requires_multiple_coordinates)
+{
+    auto params = argsToParams(info, requires_multiple_coordinates);
+    if (!params)
+        return;
+
+    auto pluginParams = argumentsToPluginParameters(info);
+
+    BOOST_ASSERT(params->IsValid());
+
+    if (!info[info.Length() - 1]->IsFunction())
+        return Nan::ThrowTypeError("last argument must be a callback function");
+
+    auto *const self = Nan::ObjectWrap::Unwrap<Engine>(info.Holder());
+    using ParamPtr = decltype(params);
+
+    struct Worker final : Nan::AsyncWorker
+    {
+        using Base = Nan::AsyncWorker;
+
+        Worker(std::shared_ptr<osrm::OSRM> osrm_,
+               ParamPtr params_,
+               ServiceMemFn service,
+               Nan::Callback *callback,
+               PluginParameters pluginParams_)
+            : Base(callback), osrm{std::move(osrm_)}, service{std::move(service)},
+              params{std::move(params_)}, pluginParams{std::move(pluginParams_)}
         {
         }
 
@@ -166,18 +252,14 @@ inline void async(const Nan::FunctionCallbackInfo<v8::Value> &info,
         std::shared_ptr<osrm::OSRM> osrm;
         ServiceMemFn service;
         const ParamPtr params;
+        const PluginParameters pluginParams;
 
-        // All services return json::Object .. except for Tile!
-        using ObjectOrString =
-            typename std::conditional<std::is_same<ParamPtr, tile_parameters_ptr>::value,
-                                      std::string,
-                                      osrm::json::Object>::type;
-
-        ObjectOrString result;
+        std::string result;
     };
 
     auto *callback = new Nan::Callback{info[info.Length() - 1].As<v8::Function>()};
-    Nan::AsyncQueueWorker(new Worker{self->this_, std::move(params), service, callback});
+    Nan::AsyncQueueWorker(
+        new Worker{self->this_, std::move(params), service, callback, std::move(pluginParams)});
 }
 
 // clang-format off
@@ -262,7 +344,7 @@ NAN_METHOD(Engine::nearest) //
 
 // clang-format off
 /**
- * Computes duration tables for the given locations. Allows for both symmetric and asymmetric
+ * Computes duration and distance tables for the given locations. Allows for both symmetric and asymmetric
  * tables.
  *
  * @name table
@@ -273,17 +355,20 @@ NAN_METHOD(Engine::nearest) //
  *                                   Can be `null` or an array of `[{value},{range}]` with `integer 0 .. 360,integer 0 .. 180`.
  * @param {Array} [options.radiuses] Limits the coordinate snapping to streets in the given radius in meters. Can be `null` (unlimited, default) or `double >= 0`.
  * @param {Array} [options.hints] Hints for the coordinate snapping. Array of base64 encoded strings.
- * @param {Array} [options.sources] An array of `index` elements (`0 <= integer < #coordinates`) to
- * use
- * location with given index as source. Default is to use all.
- * @param {Array} [options.destinations] An array of `index` elements (`0 <= integer <
- * #coordinates`) to use location with given index as destination. Default is to use all.
+ * @param {Array} [options.sources] An array of `index` elements (`0 <= integer < #coordinates`) to use
+ *                                  location with given index as source. Default is to use all.
+ * @param {Array} [options.destinations] An array of `index` elements (`0 <= integer < #coordinates`) to use location with given index as destination. Default is to use all.
  * @param {Array} [options.approaches] Keep waypoints on curb side. Can be `null` (unrestricted, default) or `curb`.
+ * @param {Array} [options.annotations] An array of the table types to return. Values can be `duration` or `distance` or both. If no annotations parameter is added, the default is to return the `durations` table. If `annotations=distance` or `annotations=duration,distance` is requested when running a MLD router, a `NotImplemented` error will be returned.
+
  * @param {Function} callback
  *
- * @returns {Object} containing `durations`, `sources`, and `destinations`.
+ * @returns {Object} containing `durations`, `distances`, `sources`, and `destinations`.
  * **`durations`**: array of arrays that stores the matrix in row-major order. `durations[i][j]` gives the travel time from the i-th waypoint to the j-th waypoint.
  *                  Values are given in seconds.
+ * **`distances`**: array of arrays that stores the matrix in row-major order. `distances[i][j]` gives the travel time from the i-th waypoint to the j-th waypoint.
+ *                  Values are given in meters. Note that computing the `distances` table is currently only implemented for CH. If `annotations=distance` or
+ *                  `annotations=duration,distance` is requested when running a MLD router, a `NotImplemented` error will be returned.
  * **`sources`**: array of [`Ẁaypoint`](#waypoint) objects describing all sources in order.
  * **`destinations`**: array of [`Ẁaypoint`](#waypoint) objects describing all destinations in order.
  *
@@ -298,6 +383,7 @@ NAN_METHOD(Engine::nearest) //
  * };
  * osrm.table(options, function(err, response) {
  *   console.log(response.durations); // array of arrays, matrix in row-major order
+ *   console.log(response.distances); // array of arrays, matrix in row-major order (currently only implemented for CH router)
  *   console.log(response.sources); // array of Waypoint objects
  *   console.log(response.destinations); // array of Waypoint objects
  * });
@@ -336,7 +422,7 @@ NAN_METHOD(Engine::table) //
 // clang-format on
 NAN_METHOD(Engine::tile)
 {
-    async(info, &argumentsToTileParameters, &osrm::OSRM::Tile, {/*unused*/});
+    asyncForTiles(info, &argumentsToTileParameters, &osrm::OSRM::Tile, {/*unused*/});
 }
 
 // clang-format off

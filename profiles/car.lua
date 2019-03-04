@@ -9,6 +9,7 @@ Relations = require("lib/relations")
 find_access_tag = require("lib/access").find_access_tag
 limit = require("lib/maxspeed").limit
 Utils = require("lib/utils")
+Measure = require("lib/measure")
 
 function setup()
   return {
@@ -38,8 +39,12 @@ function setup()
     cardinal_directions       = false,
 
     -- Size of the vehicle, to be limited by physical restriction of the way
-    vehicle_height = 2.5, -- in metters, 2.5m is the height of van
-    vehicle_width = 1.9, -- in metters, ways with narrow tag are considered narrower than 2.2m
+    vehicle_height = 2.5, -- in meters, 2.5m is the height of van
+    vehicle_width = 1.9, -- in meters, ways with narrow tag are considered narrower than 2.2m
+
+    -- Size of the vehicle, to be limited mostly by legal restriction of the way
+    vehicle_length = 4.8, -- in meters, 4.8m is the length of large or familly car
+    vehicle_weight = 2000, -- in kilograms
 
     -- a list of suffixes to suppress in name change instructions. The suffixes also include common substrings of each other
     suffix_list = {
@@ -54,7 +59,9 @@ function setup()
       'gate',
       'lift_gate',
       'no',
-      'entrance'
+      'entrance',
+      'height_restrictor',
+      'arch'
     },
 
     access_tag_whitelist = Set {
@@ -77,6 +84,11 @@ function setup()
       'private',
       'delivery',
       'destination'
+    },
+
+    -- tags disallow access to in combination with highway=service
+    service_access_tag_blacklist = Set {
+        'private'
     },
 
     restricted_access_tag_list = Set {
@@ -166,7 +178,8 @@ function setup()
       'tertiary_link',
       'residential',
       'living_street',
-      'unclassified'
+      'unclassified',
+      'service'
     },
 
     construction_whitelist = Set {
@@ -257,6 +270,7 @@ function setup()
       ["at:rural"] = 100,
       ["at:trunk"] = 100,
       ["be:motorway"] = 120,
+      ["be-vlg:rural"] = 70,
       ["by:urban"] = 60,
       ["by:motorway"] = 110,
       ["ch:rural"] = 80,
@@ -268,6 +282,7 @@ function setup()
       ["de:rural"] = 100,
       ["de:motorway"] = 0,
       ["dk:rural"] = 80,
+      ["fr:rural"] = 80,
       ["gb:nsl_single"] = (60*1609)/1000,
       ["gb:nsl_dual"] = (70*1609)/1000,
       ["gb:motorway"] = (70*1609)/1000,
@@ -292,6 +307,14 @@ function setup()
 
     relation_types = Sequence {
       "route"
+    },
+
+    -- classify highway tags when necessary for turn weights
+    highway_turn_classification = {
+    },
+
+    -- classify access tags when necessary for turn weights
+    access_turn_classification = {
     }
   }
 end
@@ -306,11 +329,18 @@ function process_node(profile, node, result, relations)
   else
     local barrier = node:get_value_by_key("barrier")
     if barrier then
+      --  check height restriction barriers
+      local restricted_by_height = false
+      if barrier == 'height_restrictor' then
+         local maxheight = Measure.get_max_height(node:get_value_by_key("maxheight"), node)
+         restricted_by_height = maxheight and maxheight < profile.vehicle_height
+      end
+
       --  make an exception for rising bollard barriers
       local bollard = node:get_value_by_key("bollard")
       local rising_bollard = bollard and "rising" == bollard
 
-      if not profile.barrier_whitelist[barrier] and not rising_bollard then
+      if not profile.barrier_whitelist[barrier] and not rising_bollard or restricted_by_height then
         result.barrier = true
       end
     end
@@ -364,6 +394,8 @@ function process_way(profile, way, result, relations)
     WayHandlers.avoid_ways,
     WayHandlers.handle_height,
     WayHandlers.handle_width,
+    WayHandlers.handle_length,
+    WayHandlers.handle_weight,
 
     -- determine access status by checking our hierarchy of
     -- access tags, e.g: motorcar, motor_vehicle, vehicle
@@ -407,7 +439,10 @@ function process_way(profile, way, result, relations)
     WayHandlers.names,
 
     -- set weight properties of the way
-    WayHandlers.weights
+    WayHandlers.weights,
+
+    -- set classification of ways relevant for turns
+    WayHandlers.way_classification_for_turn
   }
 
   WayHandlers.run(profile, way, result, data, handlers, relations)

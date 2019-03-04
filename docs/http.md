@@ -32,6 +32,7 @@ To pass parameters to each location some options support an array like encoding:
 |hints           |`{hint};{hint}[;{hint} ...]`                            |Hint from previous request to derive position in street network.                                       |
 |approaches      |`{approach};{approach}[;{approach} ...]`                |Keep waypoints on curb side.                                                                           |
 |exclude         |`{class}[,{class}]`                                     |Additive list of classes to avoid, order does not matter.                                              |
+|snapping        |`default` (default), `any`                              |Default snapping avoids is_startpoint (see profile) edges, `any` will snap to any edge in the graph    |
 
 Where the elements follow the following format:
 
@@ -70,6 +71,8 @@ curl 'http://router.project-osrm.org/route/v1/driving/polyline(ofp_Ik_vpAilAyu@t
 
 ### Responses
 
+#### Code
+
 Every response object has a `code` property containing one of the strings below or a service dependent code:
 
 | Type              | Description                                                                      |
@@ -87,12 +90,17 @@ Every response object has a `code` property containing one of the strings below 
 - `message` is a **optional** human-readable error message. All other status types are service dependent.
 - In case of an error the HTTP status code will be `400`. Otherwise the HTTP status code will be `200` and `code` will be `Ok`.
 
+#### Data version
+
+Every response object has a `data_version` propetry containing timestamp from the original OpenStreetMap file. This field is optional. It can be ommited if data_version parametr was not set on osrm-extract stage or OSM file has not `osmosis_replication_timestamp` section.
+
 #### Example response
 
 ```json
 {
 "code": "Ok",
-"message": "Everything worked"
+"message": "Everything worked",
+"data_version": "2017-11-17T21:43:02Z"
 }
 ```
 
@@ -119,7 +127,7 @@ In addition to the [general options](#general-options) the following options are
 
 - `code` if the request was successful `Ok` otherwise see the service dependent and general status codes.
 - `waypoints` array of `Waypoint` objects sorted by distance to the input coordinate. Each object has at least the following additional properties:
-  - `distance`: Distance in meters to the supplied input coordinate.
+  - `nodes`: Array of OpenStreetMap node ids.
 
 #### Example Requests
 
@@ -134,6 +142,10 @@ curl 'http://router.project-osrm.org/nearest/v1/driving/13.388860,52.517037?numb
 {
    "waypoints" : [
       {
+         "nodes": [
+            2264199819,
+            0
+         ],
          "hint" : "KSoKADRYroqUBAEAEAAAABkAAAAGAAAAAAAAABhnCQCLtwAA_0vMAKlYIQM8TMwArVghAwEAAQH1a66g",
          "distance" : 4.152629,
          "name" : "Friedrichstraße",
@@ -143,6 +155,10 @@ curl 'http://router.project-osrm.org/nearest/v1/driving/13.388860,52.517037?numb
          ]
       },
       {
+         "nodes": [
+            2045820592,
+            0
+         ],
          "hint" : "KSoKADRYroqUBAEABgAAAAAAAAAAAAAAKQAAABhnCQCLtwAA7kvMAAxZIQM8TMwArVghAwAAAQH1a66g",
          "distance" : 11.811961,
          "name" : "Friedrichstraße",
@@ -152,6 +168,10 @@ curl 'http://router.project-osrm.org/nearest/v1/driving/13.388860,52.517037?numb
          ]
       },
       {
+         "nodes": [
+            0,
+            21487242
+         ],
          "hint" : "KioKgDbbDgCUBAEAAAAAABoAAAAAAAAAPAAAABlnCQCLtwAA50vMADJZIQM8TMwArVghAwAAAQH1a66g",
          "distance" : 15.872438,
          "name" : "Friedrichstraße",
@@ -183,6 +203,7 @@ In addition to the [general options](#general-options) the following options are
 |geometries  |`polyline` (default), `polyline6`, `geojson` |Returned route geometry format (influences overview and per step)              |
 |overview    |`simplified` (default), `full`, `false`      |Add overview geometry either full, simplified according to highest zoom level it could be display on, or not at all.|
 |continue\_straight |`default` (default), `true`, `false` |Forces the route to keep going straight at waypoints constraining uturns there even if it would be faster. Default value depends on the profile. |
+|waypoints   | `{index};{index};{index}...`                   |Treats input coordinates indicated by given indices as waypoints in returned Match object. Default is to treat all input coordinates as waypoints.    |
 
 \* Please note that even if alternative routes are requested, a result cannot be guaranteed.
 
@@ -209,13 +230,13 @@ curl 'http://router.project-osrm.org/route/v1/driving/13.388860,52.517037;13.397
 
 ### Table service
 
-Computes the duration of the fastest route between all pairs of supplied coordinates.
+Computes the duration of the fastest route between all pairs of supplied coordinates. Returns the durations or distances or both between the coordinate pairs. Note that the distances are not the shortest distance between two coordinates, but rather the distances of the fastest routes. Duration is in seconds and distances is in meters.
 
 ```endpoint
-GET /table/v1/{profile}/{coordinates}?{sources}=[{elem}...];&destinations=[{elem}...]
+GET /table/v1/{profile}/{coordinates}?{sources}=[{elem}...];&{destinations}=[{elem}...]&annotations={duration|distance|duration,distance}
 ```
 
-**Coordinates**
+**Options**
 
 In addition to the [general options](#general-options) the following options are supported for this service:
 
@@ -223,6 +244,10 @@ In addition to the [general options](#general-options) the following options are
 |------------|--------------------------------------------------|---------------------------------------------|
 |sources     |`{index};{index}[;{index} ...]` or `all` (default)|Use location with given index as source.     |
 |destinations|`{index};{index}[;{index} ...]` or `all` (default)|Use location with given index as destination.|
+|annotations |`duration` (default), `distance`, or `duration,distance`|Return the requested table or tables in response. |
+|fallback_speed|`double > 0`| If no route found between a source/destination pair, calculate the as-the-crow-flies distance, then use this speed to estimate duration.|
+|fallback_coordinate|`input` (default), or `snapped`| When using a `fallback_speed`, use the user-supplied coordinate (`input`), or the snapped location (`snapped`) for calculating distances.|
+|scale_factor|`double > 0`| Use in conjunction with `annotations=durations`. Scales the table `duration` values by this number.|
 
 Unlike other array encoded options, the length of `sources` and `destinations` can be **smaller or equal**
 to number of input locations;
@@ -240,14 +265,23 @@ sources=0;5;7&destinations=5;1;4;2;3;6
 #### Example Request
 
 ```curl
-# Returns a 3x3 matrix:
+# Returns a 3x3 duration matrix:
 curl 'http://router.project-osrm.org/table/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219'
 
-# Returns a 1x3 matrix
+# Returns a 1x3 duration matrix
 curl 'http://router.project-osrm.org/table/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219?sources=0'
 
-# Returns a asymmetric 3x2 matrix with from the polyline encoded locations `qikdcB}~dpXkkHz`:
+# Returns a asymmetric 3x2 duration matrix with from the polyline encoded locations `qikdcB}~dpXkkHz`:
 curl 'http://router.project-osrm.org/table/v1/driving/polyline(egs_Iq_aqAppHzbHulFzeMe`EuvKpnCglA)?sources=0;1;3&destinations=2;4'
+
+# Returns a 3x3 duration matrix:
+curl 'http://router.project-osrm.org/table/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219?annotations=duration'
+
+# Returns a 3x3 distance matrix for CH:
+curl 'http://router.project-osrm.org/table/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219?annotations=distance'
+
+# Returns a 3x3 duration matrix and a 3x3 distance matrix for CH:
+curl 'http://router.project-osrm.org/table/v1/driving/13.388860,52.517037;13.397634,52.529407;13.428555,52.523219?annotations=distance,duration'
 ```
 
 **Response**
@@ -255,16 +289,119 @@ curl 'http://router.project-osrm.org/table/v1/driving/polyline(egs_Iq_aqAppHzbHu
 - `code` if the request was successful `Ok` otherwise see the service dependent and general status codes.
 - `durations` array of arrays that stores the matrix in row-major order. `durations[i][j]` gives the travel time from
   the i-th waypoint to the j-th waypoint. Values are given in seconds. Can be `null` if no route between `i` and `j` can be found.
+- `distances` array of arrays that stores the matrix in row-major order. `distances[i][j]` gives the travel distance from
+  the i-th waypoint to the j-th waypoint. Values are given in meters. Can be `null` if no route between `i` and `j` can be found.
 - `sources` array of `Waypoint` objects describing all sources in order
 - `destinations` array of `Waypoint` objects describing all destinations in order
+- `fallback_speed_cells` (optional) array of arrays containing `i,j` pairs indicating which cells contain estimated values based on `fallback_speed`.  Will be absent if `fallback_speed` is not used.
 
 In case of error the following `code`s are supported in addition to the general ones:
 
-| Type              | Description     |
-|-------------------|-----------------|
+| Type             | Description     |
+|------------------|-----------------|
 | `NoTable`        | No route found. |
+| `NotImplemented`  | This request is not supported |
 
 All other properties might be undefined.
+
+#### Example Response
+
+```json
+{
+  "sources": [
+    {
+      "location": [
+        13.3888,
+        52.517033
+      ],
+      "hint": "PAMAgEVJAoAUAAAAIAAAAAcAAAAAAAAArss0Qa7LNEHiVIRA4lSEQAoAAAAQAAAABAAAAAAAAADMAAAAAEzMAKlYIQM8TMwArVghAwEA3wps52D3",
+      "name": "Friedrichstraße"
+    },
+    {
+      "location": [
+        13.397631,
+        52.529432
+      ],
+      "hint": "WIQBgL6mAoAEAAAABgAAAAAAAAA7AAAAhU6PQHvHj0IAAAAAQbyYQgQAAAAGAAAAAAAAADsAAADMAAAAf27MABiJIQOCbswA_4ghAwAAXwVs52D3",
+      "name": "Torstraße"
+    },
+    {
+      "location": [
+        13.428554,
+        52.523239
+      ],
+      "hint": "7UcAgP___38fAAAAUQAAACYAAABTAAAAhSQKQrXq5kKRbiZCWJo_Qx8AAABRAAAAJgAAAFMAAADMAAAASufMAOdwIQNL58wA03AhAwMAvxBs52D3",
+      "name": "Platz der Vereinten Nationen"
+    }
+  ],
+  "durations": [
+    [
+      0,
+      192.6,
+      382.8
+    ],
+    [
+      199,
+      0,
+      283.9
+    ],
+    [
+      344.7,
+      222.3,
+      0
+    ]
+  ],
+  "destinations": [
+    {
+      "location": [
+        13.3888,
+        52.517033
+      ],
+      "hint": "PAMAgEVJAoAUAAAAIAAAAAcAAAAAAAAArss0Qa7LNEHiVIRA4lSEQAoAAAAQAAAABAAAAAAAAADMAAAAAEzMAKlYIQM8TMwArVghAwEA3wps52D3",
+      "name": "Friedrichstraße"
+    },
+    {
+      "location": [
+        13.397631,
+        52.529432
+      ],
+      "hint": "WIQBgL6mAoAEAAAABgAAAAAAAAA7AAAAhU6PQHvHj0IAAAAAQbyYQgQAAAAGAAAAAAAAADsAAADMAAAAf27MABiJIQOCbswA_4ghAwAAXwVs52D3",
+      "name": "Torstraße"
+    },
+    {
+      "location": [
+        13.428554,
+        52.523239
+      ],
+      "hint": "7UcAgP___38fAAAAUQAAACYAAABTAAAAhSQKQrXq5kKRbiZCWJo_Qx8AAABRAAAAJgAAAFMAAADMAAAASufMAOdwIQNL58wA03AhAwMAvxBs52D3",
+      "name": "Platz der Vereinten Nationen"
+    }
+  ],
+  "code": "Ok",
+  "distances": [
+    [
+      0,
+      1886.89,
+      3791.3
+    ],
+    [
+      1824,
+      0,
+      2838.09
+    ],
+    [
+      3275.36,
+      2361.73,
+      0
+    ]
+  ],
+  "fallback_speed_cells": [
+    [ 0, 1 ],
+    [ 1, 0 ]
+  ]
+}
+```
+
 
 ### Match service
 
@@ -429,6 +566,7 @@ Vector tiles contain two layers:
 | `weight  `   | `integer` | how long this segment takes to traverse, in units (may differ from `duration` when artificial biasing is applied in the Lua profiles).  ACTUAL ROUTING USES THIS VALUE. |
 | `name`       | `string`  | the name of the road this segment belongs to |
 | `rate`       | `float`   | the value of `length/weight` - analagous to `speed`, but using the `weight` value rather than `duration`, rounded to the nearest integer |
+| `is_startpoint` | `boolean` | whether this segment can be used as a start/endpoint for routes |
 
 `turns` layer:
 
@@ -534,6 +672,7 @@ With `steps=false` and `annotations=true`:
     "distance": [5,5,10,5,5],
     "duration": [15,15,40,15,15],
     "datasources": [1,0,0,0,1],
+    "metadata": { "datasource_names": ["traffic","lua profile","lua profile","lua profile","traffic"] },
     "nodes": [49772551,49772552,49786799,49786800,49786801,49786802],
     "speed": [0.3, 0.3, 0.3, 0.3, 0.3]
   }
@@ -548,10 +687,12 @@ Annotation of the whole route leg with fine-grained information about each segme
 
 - `distance`: The distance, in metres, between each pair of coordinates
 - `duration`: The duration between each pair of coordinates, in seconds.  Does not include the duration of any turns.
-- `datasources`: The index of the datasource for the speed between each pair of coordinates. `0` is the default profile, other values are supplied via `--segment-speed-file` to `osrm-contract`
+- `datasources`: The index of the datasource for the speed between each pair of coordinates. `0` is the default profile, other values are supplied via `--segment-speed-file` to `osrm-contract` or `osrm-customize`.  String-like names are in the `metadata.datasource_names` array.
 - `nodes`: The OSM node ID for each coordinate along the route, excluding the first/last user-supplied coordinates
 - `weight`: The weights between each pair of coordinates.  Does not include any turn costs.
 - `speed`: Convenience field, calculation of `distance / duration` rounded to one decimal place
+- `metadata`: Metadata related to other annotations
+  - `datasource_names`: The names of the datasources used for the speed between each pair of coordinates.  `lua profile` is the default profile, other values arethe filenames supplied via `--segment-speed-file` to `osrm-contract` or `osrm-customize`
 
 #### Example
 
@@ -560,6 +701,7 @@ Annotation of the whole route leg with fine-grained information about each segme
   "distance": [5,5,10,5,5],
   "duration": [15,15,40,15,15],
   "datasources": [1,0,0,0,1],
+  "metadata": { "datasource_names": ["traffic","lua profile","lua profile","lua profile","traffic"] },
   "nodes": [49772551,49772552,49786799,49786800,49786801,49786802],
   "weight": [15,15,40,15,15]
 }
@@ -779,6 +921,7 @@ Object used to describe waypoint on a route.
 
 - `name` Name of the street the coordinate snapped to
 - `location` Array that contains the `[longitude, latitude]` pair of the snapped coordinate
+- `distance` The distance, in metres, from the input coordinate to the snapped coordinate
 - `hint` Unique internal identifier of the segment (ephemeral, not constant over data updates)
    This can be used on subsequent request to significantly speed up the query and to connect multiple services.
    E.g. you can use the `hint` value obtained by the `nearest` query as `hint` values for `route` inputs.

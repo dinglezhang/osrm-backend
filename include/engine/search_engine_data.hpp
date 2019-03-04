@@ -30,7 +30,11 @@ struct HeapData
 struct ManyToManyHeapData : HeapData
 {
     EdgeWeight duration;
-    ManyToManyHeapData(NodeID p, EdgeWeight duration) : HeapData(p), duration(duration) {}
+    EdgeDistance distance;
+    ManyToManyHeapData(NodeID p, EdgeWeight duration, EdgeDistance distance)
+        : HeapData(p), duration(duration), distance(distance)
+    {
+    }
 };
 
 template <> struct SearchEngineData<routing_algorithms::ch::Algorithm>
@@ -75,12 +79,16 @@ struct MultiLayerDijkstraHeapData
 struct ManyToManyMultiLayerDijkstraHeapData : MultiLayerDijkstraHeapData
 {
     EdgeWeight duration;
-    ManyToManyMultiLayerDijkstraHeapData(NodeID p, EdgeWeight duration)
-        : MultiLayerDijkstraHeapData(p), duration(duration)
+    EdgeDistance distance;
+    ManyToManyMultiLayerDijkstraHeapData(NodeID p, EdgeWeight duration, EdgeDistance distance)
+        : MultiLayerDijkstraHeapData(p), duration(duration), distance(distance)
     {
     }
-    ManyToManyMultiLayerDijkstraHeapData(NodeID p, bool from, EdgeWeight duration)
-        : MultiLayerDijkstraHeapData(p, from), duration(duration)
+    ManyToManyMultiLayerDijkstraHeapData(NodeID p,
+                                         bool from,
+                                         EdgeWeight duration,
+                                         EdgeDistance distance)
+        : MultiLayerDijkstraHeapData(p, from), duration(duration), distance(distance)
     {
     }
 };
@@ -91,13 +99,13 @@ template <> struct SearchEngineData<routing_algorithms::mld::Algorithm>
                                       NodeID,
                                       EdgeWeight,
                                       MultiLayerDijkstraHeapData,
-                                      util::UnorderedMapStorage<NodeID, int>>;
+                                      util::TwoLevelStorage<NodeID, int>>;
 
     using ManyToManyQueryHeap = util::QueryHeap<NodeID,
                                                 NodeID,
                                                 EdgeWeight,
                                                 ManyToManyMultiLayerDijkstraHeapData,
-                                                util::UnorderedMapStorage<NodeID, int>>;
+                                                util::TwoLevelStorage<NodeID, int>>;
 
     using SearchEngineHeapPtr = boost::thread_specific_ptr<QueryHeap>;
     using ManyToManyHeapPtr = boost::thread_specific_ptr<ManyToManyQueryHeap>;
@@ -106,9 +114,11 @@ template <> struct SearchEngineData<routing_algorithms::mld::Algorithm>
     static SearchEngineHeapPtr reverse_heap_1;
     static ManyToManyHeapPtr many_to_many_heap;
 
-    void InitializeOrClearFirstThreadLocalStorage(unsigned number_of_nodes);
+    void InitializeOrClearFirstThreadLocalStorage(unsigned number_of_nodes,
+                                                  unsigned number_of_boundary_nodes);
 
-    void InitializeOrClearManyToManyThreadLocalStorage(unsigned number_of_nodes);
+    void InitializeOrClearManyToManyThreadLocalStorage(unsigned number_of_nodes,
+                                                       unsigned number_of_boundary_nodes);
 };
 }
 }

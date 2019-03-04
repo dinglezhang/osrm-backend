@@ -2,6 +2,7 @@
 #define OSRM_BINDINGS_NODE_SUPPORT_HPP
 
 #include "nodejs/json_v8_renderer.hpp"
+#include "util/json_renderer.hpp"
 
 #include "osrm/approach.hpp"
 #include "osrm/bearing.hpp"
@@ -24,6 +25,7 @@
 #include <algorithm>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -42,6 +44,13 @@ using match_parameters_ptr = std::unique_ptr<osrm::MatchParameters>;
 using nearest_parameters_ptr = std::unique_ptr<osrm::NearestParameters>;
 using table_parameters_ptr = std::unique_ptr<osrm::TableParameters>;
 
+struct PluginParameters
+{
+    bool renderJSONToBuffer = false;
+};
+
+using ObjectOrString = typename mapbox::util::variant<osrm::json::Object, std::string>;
+
 template <typename ResultT> inline v8::Local<v8::Value> render(const ResultT &result);
 
 template <> v8::Local<v8::Value> inline render(const std::string &result)
@@ -49,11 +58,21 @@ template <> v8::Local<v8::Value> inline render(const std::string &result)
     return Nan::CopyBuffer(result.data(), result.size()).ToLocalChecked();
 }
 
-template <> v8::Local<v8::Value> inline render(const osrm::json::Object &result)
+template <> v8::Local<v8::Value> inline render(const ObjectOrString &result)
 {
-    v8::Local<v8::Value> value;
-    renderToV8(value, result);
-    return value;
+    if (result.is<osrm::json::Object>())
+    {
+        // Convert osrm::json object tree into matching v8 object tree
+        v8::Local<v8::Value> value;
+        renderToV8(value, result.get<osrm::json::Object>());
+        return value;
+    }
+    else
+    {
+        // Return the string object as a node Buffer
+        return Nan::CopyBuffer(result.get<std::string>().data(), result.get<std::string>().size())
+            .ToLocalChecked();
+    }
 }
 
 inline void ParseResult(const osrm::Status &result_status, osrm::json::Object &result)
@@ -115,14 +134,52 @@ inline engine_config_ptr argumentsToEngineConfig(const Nan::FunctionCallbackInfo
     if (path.IsEmpty())
         return engine_config_ptr();
 
+    auto memory_file = params->Get(Nan::New("memory_file").ToLocalChecked());
+    if (memory_file.IsEmpty())
+        return engine_config_ptr();
+
     auto shared_memory = params->Get(Nan::New("shared_memory").ToLocalChecked());
     if (shared_memory.IsEmpty())
         return engine_config_ptr();
+
+    auto mmap_memory = params->Get(Nan::New("mmap_memory").ToLocalChecked());
+    if (mmap_memory.IsEmpty())
+        return engine_config_ptr();
+
+    if (!memory_file->IsUndefined())
+    {
+        if (path->IsUndefined())
+        {
+            Nan::ThrowError("memory_file option requires a path to a file.");
+            return engine_config_ptr();
+        }
+
+        engine_config->memory_file =
+            *v8::String::Utf8Value(Nan::To<v8::String>(memory_file).ToLocalChecked());
+    }
+
+    auto dataset_name = params->Get(Nan::New("dataset_name").ToLocalChecked());
+    if (dataset_name.IsEmpty())
+        return engine_config_ptr();
+    if (!dataset_name->IsUndefined())
+    {
+        if (dataset_name->IsString())
+        {
+            engine_config->dataset_name =
+                *v8::String::Utf8Value(Nan::To<v8::String>(dataset_name).ToLocalChecked());
+        }
+        else
+        {
+            Nan::ThrowError("dataset_name needs to be a string");
+            return engine_config_ptr();
+        }
+    }
 
     if (!path->IsUndefined())
     {
         engine_config->storage_config =
             osrm::StorageConfig(*v8::String::Utf8Value(Nan::To<v8::String>(path).ToLocalChecked()));
+
         engine_config->use_shared_memory = false;
     }
     if (!shared_memory->IsUndefined())
@@ -134,6 +191,18 @@ inline engine_config_ptr argumentsToEngineConfig(const Nan::FunctionCallbackInfo
         else
         {
             Nan::ThrowError("Shared_memory option must be a boolean");
+            return engine_config_ptr();
+        }
+    }
+    if (!mmap_memory->IsUndefined())
+    {
+        if (mmap_memory->IsBoolean())
+        {
+            engine_config->use_mmap = Nan::To<bool>(mmap_memory).FromJust();
+        }
+        else
+        {
+            Nan::ThrowError("mmap_memory option must be a boolean");
             return engine_config_ptr();
         }
     }
@@ -780,6 +849,50 @@ inline bool parseCommonParameters(const v8::Local<v8::Object> &obj, ParamType &p
     return true;
 }
 
+inline PluginParameters
+argumentsToPluginParameters(const Nan::FunctionCallbackInfo<v8::Value> &args)
+{
+    if (args.Length() < 3 || !args[1]->IsObject())
+    {
+        return {};
+    }
+    v8::Local<v8::Object> obj = Nan::To<v8::Object>(args[1]).ToLocalChecked();
+    if (obj->Has(Nan::New("format").ToLocalChecked()))
+    {
+
+        v8::Local<v8::Value> format = obj->Get(Nan::New("format").ToLocalChecked());
+        if (format.IsEmpty())
+        {
+            return {};
+        }
+
+        if (!format->IsString())
+        {
+            Nan::ThrowError("format must be a string: \"object\" or \"json_buffer\"");
+            return {};
+        }
+
+        const Nan::Utf8String format_utf8str(format);
+        std::string format_str{*format_utf8str, *format_utf8str + format_utf8str.length()};
+
+        if (format_str == "object")
+        {
+            return {false};
+        }
+        else if (format_str == "json_buffer")
+        {
+            return {true};
+        }
+        else
+        {
+            Nan::ThrowError("format must be a string: \"object\" or \"json_buffer\"");
+            return {};
+        }
+    }
+
+    return {};
+}
+
 inline route_parameters_ptr
 argumentsToRouteParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
                           bool requires_multiple_coordinates)
@@ -827,6 +940,101 @@ argumentsToRouteParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
         else
         {
             Nan::ThrowError("'alternatives' param must be boolean or number");
+            return route_parameters_ptr();
+        }
+    }
+
+    if (obj->Has(Nan::New("waypoints").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> waypoints = obj->Get(Nan::New("waypoints").ToLocalChecked());
+        if (waypoints.IsEmpty())
+            return route_parameters_ptr();
+
+        // must be array
+        if (!waypoints->IsArray())
+        {
+            Nan::ThrowError(
+                "Waypoints must be an array of integers corresponding to the input coordinates.");
+            return route_parameters_ptr();
+        }
+
+        auto waypoints_array = v8::Local<v8::Array>::Cast(waypoints);
+        // must have at least two elements
+        if (waypoints_array->Length() < 2)
+        {
+            Nan::ThrowError("At least two waypoints must be provided");
+            return route_parameters_ptr();
+        }
+        auto coords_size = params->coordinates.size();
+        auto waypoints_array_size = waypoints_array->Length();
+
+        const auto first_index = Nan::To<std::uint32_t>(waypoints_array->Get(0)).FromJust();
+        const auto last_index =
+            Nan::To<std::uint32_t>(waypoints_array->Get(waypoints_array_size - 1)).FromJust();
+        if (first_index != 0 || last_index != coords_size - 1)
+        {
+            Nan::ThrowError("First and last waypoints values must correspond to first and last "
+                            "coordinate indices");
+            return route_parameters_ptr();
+        }
+
+        for (uint32_t i = 0; i < waypoints_array_size; ++i)
+        {
+            v8::Local<v8::Value> waypoint_value = waypoints_array->Get(i);
+            // all elements must be numbers
+            if (!waypoint_value->IsNumber())
+            {
+                Nan::ThrowError("Waypoint values must be an array of integers");
+                return route_parameters_ptr();
+            }
+            // check that the waypoint index corresponds with an inpute coordinate
+            const auto index = Nan::To<std::uint32_t>(waypoint_value).FromJust();
+            if (index >= coords_size)
+            {
+                Nan::ThrowError("Waypoints must correspond with the index of an input coordinate");
+                return route_parameters_ptr();
+            }
+            params->waypoints.emplace_back(static_cast<unsigned>(waypoint_value->NumberValue()));
+        }
+
+        if (!params->waypoints.empty())
+        {
+            for (std::size_t i = 0; i < params->waypoints.size() - 1; i++)
+            {
+                if (params->waypoints[i] >= params->waypoints[i + 1])
+                {
+                    Nan::ThrowError("Waypoints must be supplied in increasing order");
+                    return route_parameters_ptr();
+                }
+            }
+        }
+    }
+
+    if (obj->Has(Nan::New("snapping").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> snapping = obj->Get(Nan::New("snapping").ToLocalChecked());
+        if (snapping.IsEmpty())
+            return route_parameters_ptr();
+
+        if (!snapping->IsString())
+        {
+            Nan::ThrowError("Snapping must be a string: [default, any]");
+            return route_parameters_ptr();
+        }
+        const Nan::Utf8String snapping_utf8str(snapping);
+        std::string snapping_str{*snapping_utf8str, *snapping_utf8str + snapping_utf8str.length()};
+
+        if (snapping_str == "default")
+        {
+            params->snapping = osrm::RouteParameters::SnappingType::Default;
+        }
+        else if (snapping_str == "any")
+        {
+            params->snapping = osrm::RouteParameters::SnappingType::Any;
+        }
+        else
+        {
+            Nan::ThrowError("'snapping' param must be one of [default, any]");
             return route_parameters_ptr();
         }
     }
@@ -1030,6 +1238,110 @@ argumentsToTableParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
         }
     }
 
+    if (obj->Has(Nan::New("annotations").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> annotations = obj->Get(Nan::New("annotations").ToLocalChecked());
+        if (annotations.IsEmpty())
+            return table_parameters_ptr();
+
+        if (!annotations->IsArray())
+        {
+            Nan::ThrowError(
+                "Annotations must an array containing 'duration' or 'distance', or both");
+            return table_parameters_ptr();
+        }
+
+        params->annotations = osrm::TableParameters::AnnotationsType::None;
+
+        v8::Local<v8::Array> annotations_array = v8::Local<v8::Array>::Cast(annotations);
+        for (std::size_t i = 0; i < annotations_array->Length(); ++i)
+        {
+            const Nan::Utf8String annotations_utf8str(annotations_array->Get(i));
+            std::string annotations_str{*annotations_utf8str,
+                                        *annotations_utf8str + annotations_utf8str.length()};
+
+            if (annotations_str == "duration")
+            {
+                params->annotations =
+                    params->annotations | osrm::TableParameters::AnnotationsType::Duration;
+            }
+            else if (annotations_str == "distance")
+            {
+                params->annotations =
+                    params->annotations | osrm::TableParameters::AnnotationsType::Distance;
+            }
+            else
+            {
+                Nan::ThrowError("this 'annotations' param is not supported");
+                return table_parameters_ptr();
+            }
+        }
+    }
+
+    if (obj->Has(Nan::New("fallback_speed").ToLocalChecked()))
+    {
+        auto fallback_speed = obj->Get(Nan::New("fallback_speed").ToLocalChecked());
+
+        if (!fallback_speed->IsNumber())
+        {
+            Nan::ThrowError("fallback_speed must be a number");
+            return table_parameters_ptr();
+        }
+        else if (fallback_speed->NumberValue() <= 0)
+        {
+            Nan::ThrowError("fallback_speed must be > 0");
+            return table_parameters_ptr();
+        }
+
+        params->fallback_speed = static_cast<double>(fallback_speed->NumberValue());
+    }
+
+    if (obj->Has(Nan::New("fallback_coordinate").ToLocalChecked()))
+    {
+        auto fallback_coordinate = obj->Get(Nan::New("fallback_coordinate").ToLocalChecked());
+
+        if (!fallback_coordinate->IsString())
+        {
+            Nan::ThrowError("fallback_coordinate must be a string: [input, snapped]");
+            return table_parameters_ptr();
+        }
+
+        std::string fallback_coordinate_str = *v8::String::Utf8Value(fallback_coordinate);
+
+        if (fallback_coordinate_str == "snapped")
+        {
+            params->fallback_coordinate_type =
+                osrm::TableParameters::FallbackCoordinateType::Snapped;
+        }
+        else if (fallback_coordinate_str == "input")
+        {
+            params->fallback_coordinate_type = osrm::TableParameters::FallbackCoordinateType::Input;
+        }
+        else
+        {
+            Nan::ThrowError("'fallback_coordinate' param must be one of [input, snapped]");
+            return table_parameters_ptr();
+        }
+    }
+
+    if (obj->Has(Nan::New("scale_factor").ToLocalChecked()))
+    {
+        auto scale_factor = obj->Get(Nan::New("scale_factor").ToLocalChecked());
+
+        if (!scale_factor->IsNumber())
+        {
+            Nan::ThrowError("scale_factor must be a number");
+            return table_parameters_ptr();
+        }
+        else if (scale_factor->NumberValue() <= 0)
+        {
+            Nan::ThrowError("scale_factor must be > 0");
+            return table_parameters_ptr();
+        }
+
+        params->scale_factor = static_cast<double>(scale_factor->NumberValue());
+    }
+
     return params;
 }
 
@@ -1171,7 +1483,7 @@ argumentsToMatchParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
                 Nan::ThrowError("Timestamps array items must be numbers");
                 return match_parameters_ptr();
             }
-            params->timestamps.emplace_back(static_cast<unsigned>(timestamp->NumberValue()));
+            params->timestamps.emplace_back(static_cast<std::size_t>(timestamp->NumberValue()));
         }
     }
 
@@ -1220,6 +1532,60 @@ argumentsToMatchParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
         params->tidy = tidy->BooleanValue();
     }
 
+    if (obj->Has(Nan::New("waypoints").ToLocalChecked()))
+    {
+        v8::Local<v8::Value> waypoints = obj->Get(Nan::New("waypoints").ToLocalChecked());
+        if (waypoints.IsEmpty())
+            return match_parameters_ptr();
+
+        // must be array
+        if (!waypoints->IsArray())
+        {
+            Nan::ThrowError(
+                "Waypoints must be an array of integers corresponding to the input coordinates.");
+            return match_parameters_ptr();
+        }
+
+        auto waypoints_array = v8::Local<v8::Array>::Cast(waypoints);
+        // must have at least two elements
+        if (waypoints_array->Length() < 2)
+        {
+            Nan::ThrowError("At least two waypoints must be provided");
+            return match_parameters_ptr();
+        }
+        auto coords_size = params->coordinates.size();
+        auto waypoints_array_size = waypoints_array->Length();
+
+        const auto first_index = Nan::To<std::uint32_t>(waypoints_array->Get(0)).FromJust();
+        const auto last_index =
+            Nan::To<std::uint32_t>(waypoints_array->Get(waypoints_array_size - 1)).FromJust();
+        if (first_index != 0 || last_index != coords_size - 1)
+        {
+            Nan::ThrowError("First and last waypoints values must correspond to first and last "
+                            "coordinate indices");
+            return match_parameters_ptr();
+        }
+
+        for (uint32_t i = 0; i < waypoints_array_size; ++i)
+        {
+            v8::Local<v8::Value> waypoint_value = waypoints_array->Get(i);
+            // all elements must be numbers
+            if (!waypoint_value->IsNumber())
+            {
+                Nan::ThrowError("Waypoint values must be an array of integers");
+                return match_parameters_ptr();
+            }
+            // check that the waypoint index corresponds with an inpute coordinate
+            const auto index = Nan::To<std::uint32_t>(waypoint_value).FromJust();
+            if (index >= coords_size)
+            {
+                Nan::ThrowError("Waypoints must correspond with the index of an input coordinate");
+                return match_parameters_ptr();
+            }
+            params->waypoints.emplace_back(static_cast<unsigned>(waypoint_value->NumberValue()));
+        }
+    }
+
     bool parsedSuccessfully = parseCommonParameters(obj, params);
     if (!parsedSuccessfully)
     {
@@ -1229,6 +1595,6 @@ argumentsToMatchParameter(const Nan::FunctionCallbackInfo<v8::Value> &args,
     return params;
 }
 
-} // ns node_osrm
+} // namespace node_osrm
 
 #endif

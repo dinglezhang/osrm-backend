@@ -44,7 +44,7 @@ void filterCandidates(const std::vector<util::Coordinate> &coordinates,
                                                            coordinates[current_coordinate + 1]);
 
             // sharp turns indicate a possible uturn
-            if (turn_angle <= 90.0 || turn_angle >= 270.0)
+            if (turn_angle <= 45.0 || turn_angle >= 315.0)
             {
                 allow_uturn = true;
             }
@@ -213,7 +213,8 @@ Status MatchPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                        });
     }
 
-    auto candidates_lists = GetPhantomNodesInRange(facade, tidied.parameters, search_radiuses);
+    auto candidates_lists =
+        GetPhantomNodesInRange(facade, tidied.parameters, search_radiuses, true);
 
     filterCandidates(tidied.parameters.coordinates, candidates_lists);
     if (std::all_of(candidates_lists.begin(),
@@ -247,6 +248,7 @@ Status MatchPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
     }
 
     // Error: Check if user-supplied waypoints can be found in the resulting matches
+    if (!parameters.waypoints.empty())
     {
         std::set<std::size_t> tidied_waypoints(tidied.parameters.waypoints.begin(),
                                                tidied.parameters.waypoints.end());
@@ -262,6 +264,9 @@ Status MatchPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
                 "NoMatch", "Requested waypoint parameter could not be matched.", json_result);
         }
     }
+    // we haven't errored yet, only allow leg collapsing if it was originally requested
+    BOOST_ASSERT(parameters.waypoints.empty() || sub_matchings.size() == 1);
+    const auto collapse_legs = !parameters.waypoints.empty();
 
     // each sub_route will correspond to a MatchObject
     std::vector<InternalRouteResult> sub_routes(sub_matchings.size());
@@ -286,7 +291,7 @@ Status MatchPlugin::HandleRequest(const RoutingAlgorithmsInterface &algorithms,
         sub_routes[index] =
             algorithms.ShortestPathSearch(sub_routes[index].segment_end_coordinates, {false});
         BOOST_ASSERT(sub_routes[index].shortest_path_weight != INVALID_EDGE_WEIGHT);
-        if (!tidied.parameters.waypoints.empty())
+        if (collapse_legs)
         {
             std::vector<bool> waypoint_legs;
             waypoint_legs.reserve(sub_matchings[index].indices.size());

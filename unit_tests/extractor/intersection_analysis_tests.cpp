@@ -11,8 +11,8 @@
 BOOST_AUTO_TEST_SUITE(intersection_analysis_tests)
 
 using namespace osrm;
+using namespace osrm::guidance;
 using namespace osrm::extractor;
-using namespace osrm::extractor::guidance;
 using namespace osrm::extractor::intersection;
 using InputEdge = util::NodeBasedDynamicGraph::InputEdge;
 using Graph = util::NodeBasedDynamicGraph;
@@ -28,6 +28,7 @@ BOOST_AUTO_TEST_CASE(simple_intersection_connectivity)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     TurnLanesIndexedArray turn_lanes_data{{0, 0, 3},
                                           {TurnLaneType::uturn | TurnLaneType::left,
@@ -44,6 +45,7 @@ BOOST_AUTO_TEST_CASE(simple_intersection_connectivity)
         [](const NodeID from, const NodeID to, bool allowed, AnnotationID annotation) {
             return InputEdge{from,
                              to,
+                             1,
                              1,
                              1,
                              GeometryID{0, false},
@@ -90,6 +92,7 @@ BOOST_AUTO_TEST_CASE(simple_intersection_connectivity)
                                scripting_environment,
                                restrictions,
                                conditional_restrictions,
+                               maneuver_overrides,
                                graph,
                                annotations,
                                container);
@@ -157,6 +160,7 @@ BOOST_AUTO_TEST_CASE(roundabout_intersection_connectivity)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     TurnLanesIndexedArray turn_lanes_data;
 
@@ -167,15 +171,16 @@ BOOST_AUTO_TEST_CASE(roundabout_intersection_connectivity)
     //   ↙ ↑ ↘
     //  4  5  6
     const auto unit_edge = [](const NodeID from, const NodeID to, bool allowed, bool roundabout) {
-        return InputEdge{
-            from,
-            to,
-            1,
-            1,
-            GeometryID{0, false},
-            !allowed,
-            NodeBasedEdgeClassification{true, false, false, roundabout, false, false, false, {}},
-            0};
+        return InputEdge{from,
+                         to,
+                         1,
+                         1,
+                         1,
+                         GeometryID{0, false},
+                         !allowed,
+                         NodeBasedEdgeClassification{
+                             true, false, false, roundabout, false, false, false, {}, 0, 0},
+                         0};
     };
     std::vector<InputEdge> edges = {unit_edge(0, 1, false, false),
                                     unit_edge(0, 2, true, true),
@@ -211,6 +216,7 @@ BOOST_AUTO_TEST_CASE(roundabout_intersection_connectivity)
                                scripting_environment,
                                restrictions,
                                conditional_restrictions,
+                               maneuver_overrides,
                                graph,
                                annotations,
                                container);
@@ -261,6 +267,7 @@ BOOST_AUTO_TEST_CASE(skip_degree_two_nodes)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     TurnLanesIndexedArray turn_lanes_data;
 
@@ -272,7 +279,7 @@ BOOST_AUTO_TEST_CASE(skip_degree_two_nodes)
     //
     const auto unit_edge = [](const NodeID from, const NodeID to, bool allowed) {
         return InputEdge{
-            from, to, 1, 1, GeometryID{0, false}, !allowed, NodeBasedEdgeClassification{}, 0};
+            from, to, 1, 1, 1, GeometryID{0, false}, !allowed, NodeBasedEdgeClassification{}, 0};
     };
     std::vector<InputEdge> edges = {unit_edge(0, 1, true), // 0
                                     unit_edge(1, 0, true),
@@ -301,6 +308,7 @@ BOOST_AUTO_TEST_CASE(skip_degree_two_nodes)
                                scripting_environment,
                                restrictions,
                                conditional_restrictions,
+                               maneuver_overrides,
                                graph,
                                annotations,
                                container);

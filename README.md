@@ -9,7 +9,7 @@ High performance routing engine written in C++14 designed to run on OpenStreetMa
 The following services are available via HTTP API, C++ library interface and NodeJs wrapper:
 - Nearest - Snaps coordinates to the street network and returns the nearest matches
 - Route - Finds the fastest route between coordinates
-- Table - Computes the duration of the fastest route between all pairs of supplied coordinates
+- Table - Computes the duration or distances of the fastest route between all pairs of supplied coordinates
 - Match - Snaps noisy GPS traces to the road network in the most plausible way
 - Trip - Solves the Traveling Salesman Problem using a greedy heuristic
 - Tile - Generates Mapbox Vector Tiles with internal routing metadata
@@ -50,7 +50,7 @@ If you want to use the CH pipeline instead replace `osrm-partition` and `osrm-cu
 
 ### Using Docker
 
-We base our Docker images ([backend](https://hub.docker.com/r/osrm/osrm-backend/), [frontend](https://hub.docker.com/r/osrm/osrm-frontend/)) on Alpine Linux and make sure they are as lightweight as possible.
+We base our Docker images ([backend](https://hub.docker.com/r/osrm/osrm-backend/), [frontend](https://hub.docker.com/r/osrm/osrm-frontend/)) on Debian and make sure they are as lightweight as possible.
 
 Download OpenStreetMap extracts for example from [Geofabrik](http://download.geofabrik.de/)
 
@@ -58,16 +58,16 @@ Download OpenStreetMap extracts for example from [Geofabrik](http://download.geo
 
 Pre-process the extract with the car profile and start a routing engine HTTP server on port 5000
 
-    docker run -t -v $(pwd):/data osrm/osrm-backend osrm-extract -p /opt/car.lua /data/berlin-latest.osm.pbf
+    docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-extract -p /opt/car.lua /data/berlin-latest.osm.pbf
 
-The flag `-v $(pwd):/data` creates the directory `/data` inside the docker container, and makes the current working directory `$(pwd)` available there. The file `/data/berlin-latest.osm.pbf` inside the container is referring to `berlin-latest.osm.pbf` on the host.
+The flag `-v "${PWD}:/data"` creates the directory `/data` inside the docker container and makes the current working directory `"${PWD}"` available there. The file `/data/berlin-latest.osm.pbf` inside the container is referring to `"${PWD}/berlin-latest.osm.pbf"` on the host.
 
-    docker run -t -v $(pwd):/data osrm/osrm-backend osrm-partition /data/berlin-latest.osrm
-    docker run -t -v $(pwd):/data osrm/osrm-backend osrm-customize /data/berlin-latest.osrm
+    docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-partition /data/berlin-latest.osrm
+    docker run -t -v "${PWD}:/data" osrm/osrm-backend osrm-customize /data/berlin-latest.osrm
 
 Note that `berlin-latest.osrm` has a different file extension. 
 
-    docker run -t -i -p 5000:5000 -v $(pwd):/data osrm/osrm-backend osrm-routed --algorithm mld /data/berlin-latest.osrm
+    docker run -t -i -p 5000:5000 -v "${PWD}:/data" osrm/osrm-backend osrm-routed --algorithm mld /data/berlin-latest.osrm
 
 Make requests against the HTTP server
 

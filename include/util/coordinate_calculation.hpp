@@ -21,8 +21,8 @@ namespace coordinate_calculation
 
 namespace detail
 {
-const constexpr long double DEGREE_TO_RAD = 0.017453292519943295769236907684886;
-const constexpr long double RAD_TO_DEGREE = 1. / DEGREE_TO_RAD;
+const constexpr double DEGREE_TO_RAD = 0.017453292519943295769236907684886;
+const constexpr double RAD_TO_DEGREE = 1. / DEGREE_TO_RAD;
 // earth radius varies between 6,356.750-6,378.135 km (3,949.901-3,963.189mi)
 // The IUGG value for the equatorial radius is 6378.137 km (3963.19 miles)
 const constexpr long double EARTH_RADIUS = 6372797.560856;
@@ -42,6 +42,9 @@ inline double radToDeg(const double radian)
 
 //! Takes the squared euclidean distance of the input coordinates. Does not return meters!
 std::uint64_t squaredEuclideanDistance(const Coordinate lhs, const Coordinate rhs);
+
+double fccApproximateDistance(const Coordinate first_coordinate,
+                              const Coordinate second_coordinate);
 
 double haversineDistance(const Coordinate first_coordinate, const Coordinate second_coordinate);
 

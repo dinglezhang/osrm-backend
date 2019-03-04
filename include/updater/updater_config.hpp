@@ -50,11 +50,11 @@ struct UpdaterConfig final : storage::IOConfig
                     ".osrm.turn_penalties_index",
                     ".osrm.nbg_nodes",
                     ".osrm.ebg_nodes",
-                    ".osrm.edges",
                     ".osrm.geometry",
                     ".osrm.fileIndex",
                     ".osrm.properties",
-                    ".osrm.restrictions"},
+                    ".osrm.restrictions",
+                    ".osrm.enw"},
                    {},
                    {".osrm.datasource_names"}),
           valid_now(0)

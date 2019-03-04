@@ -1,6 +1,7 @@
 #ifndef ENGINE_API_ROUTE_HPP
 #define ENGINE_API_ROUTE_HPP
 
+#include "extractor/maneuver_override.hpp"
 #include "engine/api/base_api.hpp"
 #include "engine/api/json_factory.hpp"
 #include "engine/api/route_parameters.hpp"
@@ -18,6 +19,8 @@
 #include "engine/guidance/verbosity_reduction.hpp"
 
 #include "engine/internal_route_result.hpp"
+
+#include "guidance/turn_instruction.hpp"
 
 #include "util/coordinate.hpp"
 #include "util/integer_range.hpp"
@@ -41,8 +44,11 @@ class RouteAPI : public BaseAPI
     {
     }
 
-    void MakeResponse(const InternalManyRoutesResult &raw_routes,
-                      util::json::Object &response) const
+    void
+    MakeResponse(const InternalManyRoutesResult &raw_routes,
+                 const std::vector<PhantomNodes>
+                     &all_start_end_points, // all used coordinates, ignoring waypoints= parameter
+                 util::json::Object &response) const
     {
         BOOST_ASSERT(!raw_routes.routes.empty());
 
@@ -59,10 +65,14 @@ class RouteAPI : public BaseAPI
                                                 route.target_traversed_in_reverse));
         }
 
-        response.values["waypoints"] =
-            BaseAPI::MakeWaypoints(raw_routes.routes[0].segment_end_coordinates);
+        response.values["waypoints"] = BaseAPI::MakeWaypoints(all_start_end_points);
         response.values["routes"] = std::move(jsRoutes);
         response.values["code"] = "Ok";
+        auto data_timestamp = facade.GetTimestamp();
+        if (!data_timestamp.empty())
+        {
+            response.values["data_version"] = data_timestamp;
+        }
     }
 
   protected:
@@ -130,6 +140,7 @@ class RouteAPI : public BaseAPI
                                              reversed_target,
                                              parameters.steps);
 
+            util::Log(logDEBUG) << "Assembling steps " << std::endl;
             if (parameters.steps)
             {
                 auto steps = guidance::assembleSteps(BaseAPI::facade,
@@ -139,6 +150,13 @@ class RouteAPI : public BaseAPI
                                                      phantoms.target_phantom,
                                                      reversed_source,
                                                      reversed_target);
+
+                // Apply maneuver overrides before any other post
+                // processing is performed
+                guidance::applyOverrides(BaseAPI::facade, steps, leg_geometry);
+
+                // Collapse segregated steps before others
+                steps = guidance::collapseSegregatedTurnInstructions(std::move(steps));
 
                 /* Perform step-based post-processing.
                  *
@@ -203,11 +221,15 @@ class RouteAPI : public BaseAPI
         }
 
         std::vector<util::json::Value> step_geometries;
+        const auto total_step_count =
+            std::accumulate(legs.begin(), legs.end(), 0, [](const auto &v, const auto &leg) {
+                return v + leg.steps.size();
+            });
+        step_geometries.reserve(total_step_count);
+
         for (const auto idx : util::irange<std::size_t>(0UL, legs.size()))
         {
             auto &leg_geometry = leg_geometries[idx];
-
-            step_geometries.reserve(step_geometries.size() + legs[idx].steps.size());
 
             std::transform(
                 legs[idx].steps.begin(),
@@ -308,6 +330,23 @@ class RouteAPI : public BaseAPI
                         nodes.values.push_back(static_cast<std::uint64_t>(node_id));
                     }
                     annotation.values["nodes"] = std::move(nodes);
+                }
+                // Add any supporting metadata, if needed
+                if (requested_annotations & RouteParameters::AnnotationsType::Datasources)
+                {
+                    const auto MAX_DATASOURCE_ID = 255u;
+                    util::json::Object metadata;
+                    util::json::Array datasource_names;
+                    for (auto i = 0u; i < MAX_DATASOURCE_ID; i++)
+                    {
+                        const auto name = facade.GetDatasourceName(i);
+                        // Length of 0 indicates the first empty name, so we can stop here
+                        if (name.size() == 0)
+                            break;
+                        datasource_names.values.push_back(std::string(facade.GetDatasourceName(i)));
+                    }
+                    metadata.values["datasource_names"] = datasource_names;
+                    annotation.values["metadata"] = metadata;
                 }
 
                 annotations.push_back(std::move(annotation));

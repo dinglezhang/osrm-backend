@@ -40,7 +40,7 @@ template <> struct SearchEngineData<routing_algorithms::offline::Algorithm>
         }
         else
         {
-            forward_heap_1.reset(new QueryHeap(number_of_nodes));
+            forward_heap_1.reset(new QueryHeap(number_of_nodes, 0));
         }
 
         if (reverse_heap_1.get())
@@ -49,7 +49,7 @@ template <> struct SearchEngineData<routing_algorithms::offline::Algorithm>
         }
         else
         {
-            reverse_heap_1.reset(new QueryHeap(number_of_nodes));
+            reverse_heap_1.reset(new QueryHeap(number_of_nodes, 0));
         }
     }
 };
@@ -156,14 +156,14 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
 
     GeometryID GetGeometryIndex(const NodeID /*id*/) const override { return GeometryID{0, false}; }
 
-    std::vector<NodeID> GetUncompressedForwardGeometry(const EdgeID /*id*/) const override
+    NodeForwardRange GetUncompressedForwardGeometry(const EdgeID /*id*/) const override
     {
         return {};
     }
 
-    std::vector<NodeID> GetUncompressedReverseGeometry(const EdgeID /*id*/) const override
+    NodeReverseRange GetUncompressedReverseGeometry(const EdgeID /*id*/) const override
     {
-        return {};
+        return NodeReverseRange(NodeForwardRange());
     }
 
     TurnPenalty GetWeightPenaltyForEdgeID(const unsigned /*id*/) const override
@@ -176,42 +176,41 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
         return INVALID_TURN_PENALTY;
     }
 
-    std::vector<EdgeWeight> GetUncompressedForwardWeights(const EdgeID /*id*/) const override
+    WeightForwardRange GetUncompressedForwardWeights(const EdgeID /*id*/) const override
     {
         return {};
     }
 
-    std::vector<EdgeWeight> GetUncompressedReverseWeights(const EdgeID /*id*/) const override
+    WeightReverseRange GetUncompressedReverseWeights(const EdgeID /*id*/) const override
+    {
+        return WeightReverseRange(WeightForwardRange());
+    }
+
+    DurationForwardRange GetUncompressedForwardDurations(const EdgeID /*geomID*/) const override
     {
         return {};
     }
 
-    std::vector<EdgeWeight> GetUncompressedForwardDurations(const EdgeID /*geomID*/) const override
+    DurationReverseRange GetUncompressedReverseDurations(const EdgeID /*geomID*/) const override
+    {
+        return DurationReverseRange(DurationForwardRange());
+    }
+
+    DatasourceForwardRange GetUncompressedForwardDatasources(const EdgeID /*id*/) const override
     {
         return {};
     }
 
-    std::vector<EdgeWeight> GetUncompressedReverseDurations(const EdgeID /*geomID*/) const override
+    DatasourceReverseRange GetUncompressedReverseDatasources(const EdgeID /*id*/) const override
     {
-        return {};
-    }
-
-    std::vector<DatasourceID> GetUncompressedForwardDatasources(const EdgeID /*id*/) const override
-    {
-        return {};
-    }
-
-    std::vector<DatasourceID> GetUncompressedReverseDatasources(const EdgeID /*id*/) const override
-    {
-        return {};
+        return DatasourceReverseRange(DatasourceForwardRange());
     }
 
     StringView GetDatasourceName(const DatasourceID /*id*/) const override { return StringView{}; }
 
-    extractor::guidance::TurnInstruction
-    GetTurnInstructionForEdgeID(const EdgeID /*id*/) const override
+    guidance::TurnInstruction GetTurnInstructionForEdgeID(const EdgeID /*id*/) const override
     {
-        return extractor::guidance::TurnInstruction{};
+        return guidance::TurnInstruction{};
     }
 
     extractor::TravelMode GetTravelMode(const NodeID /*id*/) const override
@@ -230,7 +229,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
                                const float /*max_distance*/,
                                const int /*bearing*/,
                                const int /*bearing_range*/,
-                               const Approach /*approach*/) const override
+                               const Approach /*approach*/,
+                               const bool /*use_all_edges*/) const override
     {
         return {};
     }
@@ -238,7 +238,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     std::vector<PhantomNodeWithDistance>
     NearestPhantomNodesInRange(const util::Coordinate /*input_coordinate*/,
                                const float /*max_distance*/,
-                               const Approach /*approach*/) const override
+                               const Approach /*approach*/,
+                               const bool /*use_all_edges*/) const override
     {
         return {};
     }
@@ -283,7 +284,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
 
     std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate /*input_coordinate*/,
-                                                      const Approach /*approach*/) const override
+                                                      const Approach /*approach*/,
+                                                      const bool /* use_all_edges */) const override
     {
         return {};
     }
@@ -291,7 +293,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     std::pair<PhantomNode, PhantomNode>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate /*input_coordinate*/,
                                                       const double /*max_distance*/,
-                                                      const Approach /*approach*/) const override
+                                                      const Approach /*approach*/,
+                                                      const bool /* use_all_edges */) const override
     {
         return {};
     }
@@ -301,7 +304,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
                                                       const double /*max_distance*/,
                                                       const int /*bearing*/,
                                                       const int /*bearing_range*/,
-                                                      const Approach /*approach*/) const override
+                                                      const Approach /*approach*/,
+                                                      const bool /* use_all_edges */) const override
     {
         return {};
     }
@@ -310,7 +314,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     NearestPhantomNodeWithAlternativeFromBigComponent(const util::Coordinate /*input_coordinate*/,
                                                       const int /*bearing*/,
                                                       const int /*bearing_range*/,
-                                                      const Approach /*approach*/) const override
+                                                      const Approach /*approach*/,
+                                                      const bool /* use_all_edges */) const override
     {
         return {};
     }
@@ -320,11 +325,17 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
         return util::guidance::LaneTupleIdPair{};
     }
 
-    extractor::guidance::TurnLaneDescription
+    extractor::TurnLaneDescription
     GetTurnDescription(const LaneDescriptionID /*laneDescriptionID*/) const override
     {
         return {};
     }
+
+    EdgeWeight GetNodeWeight(const NodeID /*node*/) const { return 0; }
+
+    bool IsForwardEdge(const NodeID /*edge*/) const { return true; }
+
+    bool IsBackwardEdge(const NodeID /*edge*/) const { return true; }
 
     bool HasLaneData(const EdgeID /*id*/) const override { return false; }
     NameID GetNameIndex(const NodeID /*nodeID*/) const override { return EMPTY_NAMEID; }
@@ -333,8 +344,8 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     StringView GetPronunciationForID(const NameID /*id*/) const override { return StringView{}; }
     StringView GetDestinationsForID(const NameID /*id*/) const override { return StringView{}; }
     StringView GetExitsForID(const NameID /*id*/) const override { return StringView{}; }
-    std::string GetTimestamp() const override { return std::string(); }
     bool GetContinueStraightDefault() const override { return false; }
+    std::string GetTimestamp() const override { return ""; }
     double GetMapMatchingMaxSpeed() const override { return 0; }
     const char *GetWeightName() const override { return ""; }
     unsigned GetWeightPrecision() const override { return 0; }
@@ -342,14 +353,14 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     ComponentID GetComponentID(NodeID) const override { return ComponentID{}; }
     bool ExcludeNode(const NodeID) const override { return false; }
 
-    util::guidance::TurnBearing PreTurnBearing(const EdgeID /*eid*/) const override
+    guidance::TurnBearing PreTurnBearing(const EdgeID /*eid*/) const override
     {
-        return util::guidance::TurnBearing(0);
+        return guidance::TurnBearing(0);
     }
 
-    util::guidance::TurnBearing PostTurnBearing(const EdgeID /*eid*/) const override
+    guidance::TurnBearing PostTurnBearing(const EdgeID /*eid*/) const override
     {
-        return util::guidance::TurnBearing(0);
+        return guidance::TurnBearing(0);
     }
 
     util::guidance::BearingClass
@@ -367,6 +378,12 @@ class ContiguousInternalMemoryDataFacade<routing_algorithms::offline::Algorithm>
     util::guidance::EntryClass GetEntryClass(const EdgeID /*turn_id*/) const override { return {}; }
     bool IsLeftHandDriving(const NodeID /*id*/) const override { return false; }
     bool IsSegregated(const NodeID /*id*/) const override { return false; }
+
+    std::vector<extractor::ManeuverOverride>
+    GetOverridesThatStartAt(const NodeID /* edge_based_node_id */) const override
+    {
+        return {};
+    }
 };
 
 } // datafacade
@@ -432,6 +449,23 @@ BOOST_AUTO_TEST_CASE(shortest_path)
         osrm::engine::routing_algorithms::shortestPathSearch(heaps, facade, phantom_nodes, false);
 
     BOOST_CHECK_EQUAL(route.shortest_path_weight, INVALID_EDGE_WEIGHT);
+}
+
+BOOST_AUTO_TEST_CASE(facade_uncompressed_methods)
+{
+    using Algorithm = osrm::engine::routing_algorithms::offline::Algorithm;
+
+    osrm::engine::SearchEngineData<Algorithm> heaps;
+    osrm::engine::datafacade::ContiguousInternalMemoryDataFacade<Algorithm> facade;
+
+    BOOST_CHECK_EQUAL(facade.GetUncompressedForwardGeometry(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedReverseGeometry(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedForwardWeights(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedReverseWeights(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedForwardDurations(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedReverseDurations(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedForwardDatasources(0).size(), 0);
+    BOOST_CHECK_EQUAL(facade.GetUncompressedReverseDatasources(0).size(), 0);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -2,11 +2,12 @@
 #define OSRM_ENGINE_DATAFACADE_ALGORITHM_DATAFACADE_HPP
 
 #include "contractor/query_edge.hpp"
+#include "customizer/edge_based_graph.hpp"
 #include "extractor/edge_based_edge.hpp"
 #include "engine/algorithm.hpp"
 
-#include "partition/cell_storage.hpp"
-#include "partition/multi_level_partition.hpp"
+#include "partitioner/cell_storage.hpp"
+#include "partitioner/multi_level_partition.hpp"
 
 #include "util/filtered_graph.hpp"
 #include "util/integer_range.hpp"
@@ -59,25 +60,37 @@ template <> class AlgorithmDataFacade<CH>
 template <> class AlgorithmDataFacade<MLD>
 {
   public:
-    using EdgeData = extractor::EdgeBasedEdge::EdgeData;
+    using EdgeData = customizer::EdgeBasedGraphEdgeData;
     using EdgeRange = util::range<EdgeID>;
 
     // search graph access
     virtual unsigned GetNumberOfNodes() const = 0;
 
+    virtual unsigned GetMaxBorderNodeID() const = 0;
+
     virtual unsigned GetNumberOfEdges() const = 0;
 
     virtual unsigned GetOutDegree(const NodeID n) const = 0;
+
+    virtual EdgeRange GetAdjacentEdgeRange(const NodeID node) const = 0;
+
+    virtual EdgeWeight GetNodeWeight(const NodeID node) const = 0;
+
+    virtual EdgeWeight GetNodeDuration(const NodeID node) const = 0; // TODO: to be removed
+
+    virtual EdgeDistance GetNodeDistance(const NodeID node) const = 0;
+
+    virtual bool IsForwardEdge(EdgeID edge) const = 0;
+
+    virtual bool IsBackwardEdge(EdgeID edge) const = 0;
 
     virtual NodeID GetTarget(const EdgeID e) const = 0;
 
     virtual const EdgeData &GetEdgeData(const EdgeID e) const = 0;
 
-    virtual EdgeRange GetAdjacentEdgeRange(const NodeID node) const = 0;
+    virtual const partitioner::MultiLevelPartitionView &GetMultiLevelPartition() const = 0;
 
-    virtual const partition::MultiLevelPartitionView &GetMultiLevelPartition() const = 0;
-
-    virtual const partition::CellStorageView &GetCellStorage() const = 0;
+    virtual const partitioner::CellStorageView &GetCellStorage() const = 0;
 
     virtual const customizer::CellMetricView &GetCellMetric() const = 0;
 

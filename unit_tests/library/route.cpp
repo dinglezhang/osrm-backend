@@ -1,6 +1,8 @@
 #include <boost/test/test_case_template.hpp>
 #include <boost/test/unit_test.hpp>
 
+#include <cmath>
+
 #include "coordinates.hpp"
 #include "equal_json.hpp"
 #include "fixture.hpp"
@@ -32,18 +34,28 @@ BOOST_AUTO_TEST_CASE(test_route_same_coordinates_fixture)
 
     // unset snapping dependent hint
     for (auto &itr : result.values["waypoints"].get<json::Array>().values)
+    {
+        // Hint values aren't stable, so blank it out
         itr.get<json::Object>().values["hint"] = "";
+
+        // Round value to 6 decimal places for double comparison later
+        itr.get<json::Object>().values["distance"] =
+            round(itr.get<json::Object>().values["distance"].get<json::Number>().value * 1000000);
+    }
 
     const auto location = json::Array{{{7.437070}, {43.749248}}};
 
     json::Object reference{
         {{"code", "Ok"},
          {"waypoints",
-          json::Array{
-              {json::Object{
-                   {{"name", "Boulevard du Larvotto"}, {"location", location}, {"hint", ""}}},
-               json::Object{
-                   {{"name", "Boulevard du Larvotto"}, {"location", location}, {"hint", ""}}}}}},
+          json::Array{{json::Object{{{"name", "Boulevard du Larvotto"},
+                                     {"location", location},
+                                     {"distance", round(0.137249 * 1000000)},
+                                     {"hint", ""}}},
+                       json::Object{{{"name", "Boulevard du Larvotto"},
+                                     {"location", location},
+                                     {"distance", round(0.137249 * 1000000)},
+                                     {"hint", ""}}}}}},
          {"routes",
           json::Array{{json::Object{
               {{"distance", 0.},
@@ -69,13 +81,13 @@ BOOST_AUTO_TEST_CASE(test_route_same_coordinates_fixture)
                                                    json::Object{{
                                                        {"location", location},
                                                        {"bearing_before", 0},
-                                                       {"bearing_after", 58},
+                                                       {"bearing_after", 238},
                                                        {"type", "depart"},
                                                    }}},
                                                   {"intersections",
                                                    json::Array{{json::Object{
                                                        {{"location", location},
-                                                        {"bearings", json::Array{{58}}},
+                                                        {"bearings", json::Array{{238}}},
                                                         {"entry", json::Array{{json::True()}}},
                                                         {"out", 0}}}}}}}}},
 
@@ -88,13 +100,13 @@ BOOST_AUTO_TEST_CASE(test_route_same_coordinates_fixture)
                                                  {"driving_side", "right"},
                                                  {"maneuver",
                                                   json::Object{{{"location", location},
-                                                                {"bearing_before", 58},
+                                                                {"bearing_before", 238},
                                                                 {"bearing_after", 0},
                                                                 {"type", "arrive"}}}},
                                                  {"intersections",
                                                   json::Array{{json::Object{
                                                       {{"location", location},
-                                                       {"bearings", json::Array{{238}}},
+                                                       {"bearings", json::Array{{58}}},
                                                        {"entry", json::Array{{json::True()}}},
                                                        {"in", 0}}}}}}
 
@@ -407,12 +419,20 @@ BOOST_AUTO_TEST_CASE(speed_annotation_matches_duration_and_distance)
     const auto &durations = annotation.values.at("duration").get<json::Array>().values;
     const auto &distances = annotation.values.at("distance").get<json::Array>().values;
     int length = speeds.size();
+
+    BOOST_CHECK_EQUAL(length, 1);
     for (int i = 0; i < length; i++)
     {
         auto speed = speeds[i].get<json::Number>().value;
         auto duration = durations[i].get<json::Number>().value;
         auto distance = distances[i].get<json::Number>().value;
-        BOOST_CHECK_EQUAL(speed, std::round(distance / duration * 10.) / 10.);
+        auto calc = std::round(distance / duration * 10.) / 10.;
+        BOOST_CHECK_EQUAL(speed, std::isnan(calc) ? 0 : calc);
+
+        // Because we route from/to the same location, all annotations should be 0;
+        BOOST_CHECK_EQUAL(speed, 0);
+        BOOST_CHECK_EQUAL(distance, 0);
+        BOOST_CHECK_EQUAL(duration, 0);
     }
 }
 
@@ -445,7 +465,7 @@ BOOST_AUTO_TEST_CASE(test_manual_setting_of_annotations_property)
                            .values["annotation"]
                            .get<json::Object>()
                            .values;
-    BOOST_CHECK_EQUAL(annotations.size(), 5);
+    BOOST_CHECK_EQUAL(annotations.size(), 6);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

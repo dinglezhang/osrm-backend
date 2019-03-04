@@ -1,8 +1,6 @@
 #ifndef INTERNAL_EXTRACTOR_EDGE_HPP
 #define INTERNAL_EXTRACTOR_EDGE_HPP
 
-#include "extractor/guidance/road_classification.hpp"
-#include "extractor/guidance/turn_lane_types.hpp"
 #include "extractor/node_based_edge.hpp"
 #include "extractor/travel_mode.hpp"
 #include "osrm/coordinate.hpp"
@@ -65,7 +63,7 @@ struct InternalExtractorEdge
                                    WeightData weight_data,
                                    DurationData duration_data,
                                    util::Coordinate source_coordinate)
-        : result(source, target, 0, 0, {}, -1, {}), weight_data(std::move(weight_data)),
+        : result(source, target, 0, 0, 0, {}, -1, {}), weight_data(std::move(weight_data)),
           duration_data(std::move(duration_data)), source_coordinate(std::move(source_coordinate))
     {
     }

@@ -54,7 +54,7 @@ inline bool checkParentCellRestriction(CellID, const PhantomNodes &) { return tr
 
 // Restricted search (Args is LevelID, CellID):
 //   * use the fixed level for queries
-//   * check if the node cell is the same as the specified parent onr
+//   * check if the node cell is the same as the specified parent
 template <typename MultiLevelPartition>
 inline LevelID getNodeQueryLevel(const MultiLevelPartition &, NodeID, LevelID level, CellID)
 {
@@ -65,6 +65,61 @@ inline bool checkParentCellRestriction(CellID cell, LevelID, CellID parent)
 {
     return cell == parent;
 }
+
+// Unrestricted search with a single phantom node (Args is const PhantomNode &):
+//   * use partition.GetQueryLevel to find the node query level
+//   * allow to traverse all cells
+template <typename MultiLevelPartition>
+inline LevelID getNodeQueryLevel(const MultiLevelPartition &partition,
+                                 const NodeID node,
+                                 const PhantomNode &phantom_node)
+{
+    auto highest_diffrent_level = [&partition, node](const SegmentID &phantom_node) {
+        if (phantom_node.enabled)
+            return partition.GetHighestDifferentLevel(phantom_node.id, node);
+        return INVALID_LEVEL_ID;
+    };
+
+    const auto node_level = std::min(highest_diffrent_level(phantom_node.forward_segment_id),
+                                     highest_diffrent_level(phantom_node.reverse_segment_id));
+
+    return node_level;
+}
+
+// Unrestricted search with a single phantom node and a vector of phantom nodes:
+//   * use partition.GetQueryLevel to find the node query level
+//   * allow to traverse all cells
+template <typename MultiLevelPartition>
+inline LevelID getNodeQueryLevel(const MultiLevelPartition &partition,
+                                 NodeID node,
+                                 const std::vector<PhantomNode> &phantom_nodes,
+                                 const std::size_t phantom_index,
+                                 const std::vector<std::size_t> &phantom_indices)
+{
+    auto min_level = [&partition, node](const PhantomNode &phantom_node) {
+
+        const auto &forward_segment = phantom_node.forward_segment_id;
+        const auto forward_level =
+            forward_segment.enabled ? partition.GetHighestDifferentLevel(node, forward_segment.id)
+                                    : INVALID_LEVEL_ID;
+
+        const auto &reverse_segment = phantom_node.reverse_segment_id;
+        const auto reverse_level =
+            reverse_segment.enabled ? partition.GetHighestDifferentLevel(node, reverse_segment.id)
+                                    : INVALID_LEVEL_ID;
+
+        return std::min(forward_level, reverse_level);
+    };
+
+    // Get minimum level over all phantoms of the highest different level with respect to node
+    // This is equivalent to min_{∀ source, target} partition.GetQueryLevel(source, node, target)
+    auto result = min_level(phantom_nodes[phantom_index]);
+    for (const auto &index : phantom_indices)
+    {
+        result = std::min(result, min_level(phantom_nodes[index]));
+    }
+    return result;
+}
 }
 
 // Heaps only record for each node its predecessor ("parent") on the shortest path.
@@ -73,6 +128,46 @@ inline bool checkParentCellRestriction(CellID cell, LevelID, CellID parent)
 
 using PackedEdge = std::tuple</*from*/ NodeID, /*to*/ NodeID, /*from_clique_arc*/ bool>;
 using PackedPath = std::vector<PackedEdge>;
+
+template <bool DIRECTION, typename OutIter>
+inline void retrievePackedPathFromSingleManyToManyHeap(
+    const SearchEngineData<Algorithm>::ManyToManyQueryHeap &heap, const NodeID middle, OutIter out)
+{
+
+    NodeID current = middle;
+    NodeID parent = heap.GetData(current).parent;
+
+    while (current != parent)
+    {
+        const auto &data = heap.GetData(current);
+
+        if (DIRECTION == FORWARD_DIRECTION)
+        {
+            *out = std::make_tuple(parent, current, data.from_clique_arc);
+            ++out;
+        }
+        else if (DIRECTION == REVERSE_DIRECTION)
+        {
+            *out = std::make_tuple(current, parent, data.from_clique_arc);
+            ++out;
+        }
+
+        current = parent;
+        parent = heap.GetData(parent).parent;
+    }
+}
+
+template <bool DIRECTION>
+inline PackedPath retrievePackedPathFromSingleManyToManyHeap(
+    const SearchEngineData<Algorithm>::ManyToManyQueryHeap &heap, const NodeID middle)
+{
+
+    PackedPath packed_path;
+    retrievePackedPathFromSingleManyToManyHeap<DIRECTION>(
+        heap, middle, std::back_inserter(packed_path));
+
+    return packed_path;
+}
 
 template <bool DIRECTION, typename OutIter>
 inline void retrievePackedPathFromSingleHeap(const SearchEngineData<Algorithm>::QueryHeap &heap,
@@ -206,15 +301,22 @@ void relaxOutgoingEdges(const DataFacade<Algorithm> &facade,
     for (const auto edge : facade.GetBorderEdgeRange(level, node))
     {
         const auto &edge_data = facade.GetEdgeData(edge);
-        if (DIRECTION == FORWARD_DIRECTION ? edge_data.forward : edge_data.backward)
+
+        if ((DIRECTION == FORWARD_DIRECTION) ? facade.IsForwardEdge(edge)
+                                             : facade.IsBackwardEdge(edge))
         {
             const NodeID to = facade.GetTarget(edge);
 
             if (!facade.ExcludeNode(to) &&
                 checkParentCellRestriction(partition.GetCell(level + 1, to), args...))
             {
-                BOOST_ASSERT_MSG(edge_data.weight > 0, "edge_weight invalid");
-                const EdgeWeight to_weight = weight + edge_data.weight;
+                const auto node_weight =
+                    facade.GetNodeWeight(DIRECTION == FORWARD_DIRECTION ? node : to);
+                const auto turn_penalty = facade.GetWeightPenaltyForEdgeID(edge_data.turn_id);
+
+                // TODO: BOOST_ASSERT(edge_data.weight == node_weight + turn_penalty);
+
+                const EdgeWeight to_weight = weight + node_weight + turn_penalty;
 
                 if (!forward_heap.WasInserted(to))
                 {

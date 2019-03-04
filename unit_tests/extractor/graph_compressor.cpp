@@ -1,5 +1,6 @@
 #include "extractor/graph_compressor.hpp"
 #include "extractor/compressed_edge_container.hpp"
+#include "extractor/maneuver_override.hpp"
 #include "extractor/restriction.hpp"
 #include "util/node_based_graph.hpp"
 #include "util/typedefs.hpp"
@@ -30,6 +31,7 @@ inline InputEdge MakeUnitEdge(const NodeID from, const NodeID to)
             to,                            // target
             1,                             // weight
             1,                             // duration
+            1,                             // distance
             GeometryID{0, false},          // geometry_id
             false,                         // reversed
             NodeBasedEdgeClassification(), // default flags
@@ -71,6 +73,7 @@ BOOST_AUTO_TEST_CASE(long_road_test)
     std::vector<NodeBasedEdgeAnnotation> annotations(1);
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     std::vector<InputEdge> edges = {MakeUnitEdge(0, 1),
                                     MakeUnitEdge(1, 0),
@@ -82,15 +85,16 @@ BOOST_AUTO_TEST_CASE(long_road_test)
                                     MakeUnitEdge(4, 3)};
 
     Graph graph(5, edges);
-    BOOST_ASSERT(compatible(graph, annotations, 0, 2));
-    BOOST_ASSERT(compatible(graph, annotations, 2, 4));
-    BOOST_ASSERT(compatible(graph, annotations, 4, 6));
+    BOOST_CHECK(compatible(graph, annotations, 0, 2));
+    BOOST_CHECK(compatible(graph, annotations, 2, 4));
+    BOOST_CHECK(compatible(graph, annotations, 4, 6));
 
     compressor.Compress(barrier_nodes,
                         traffic_lights,
                         scripting_environment,
                         restrictions,
                         conditional_restrictions,
+                        maneuver_overrides,
                         graph,
                         annotations,
                         container);
@@ -117,6 +121,7 @@ BOOST_AUTO_TEST_CASE(loop_test)
     CompressedEdgeContainer container;
     std::vector<NodeBasedEdgeAnnotation> annotations(1);
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     std::vector<InputEdge> edges = {MakeUnitEdge(0, 1),
                                     MakeUnitEdge(0, 5),
@@ -132,25 +137,26 @@ BOOST_AUTO_TEST_CASE(loop_test)
                                     MakeUnitEdge(5, 4)};
 
     Graph graph(6, edges);
-    BOOST_ASSERT(edges.size() == 12);
-    BOOST_ASSERT(compatible(graph, annotations, 0, 1));
-    BOOST_ASSERT(compatible(graph, annotations, 1, 2));
-    BOOST_ASSERT(compatible(graph, annotations, 2, 3));
-    BOOST_ASSERT(compatible(graph, annotations, 3, 4));
-    BOOST_ASSERT(compatible(graph, annotations, 4, 5));
-    BOOST_ASSERT(compatible(graph, annotations, 5, 6));
-    BOOST_ASSERT(compatible(graph, annotations, 6, 7));
-    BOOST_ASSERT(compatible(graph, annotations, 7, 8));
-    BOOST_ASSERT(compatible(graph, annotations, 8, 9));
-    BOOST_ASSERT(compatible(graph, annotations, 9, 10));
-    BOOST_ASSERT(compatible(graph, annotations, 10, 11));
-    BOOST_ASSERT(compatible(graph, annotations, 11, 0));
+    BOOST_CHECK(edges.size() == 12);
+    BOOST_CHECK(compatible(graph, annotations, 0, 1));
+    BOOST_CHECK(compatible(graph, annotations, 1, 2));
+    BOOST_CHECK(compatible(graph, annotations, 2, 3));
+    BOOST_CHECK(compatible(graph, annotations, 3, 4));
+    BOOST_CHECK(compatible(graph, annotations, 4, 5));
+    BOOST_CHECK(compatible(graph, annotations, 5, 6));
+    BOOST_CHECK(compatible(graph, annotations, 6, 7));
+    BOOST_CHECK(compatible(graph, annotations, 7, 8));
+    BOOST_CHECK(compatible(graph, annotations, 8, 9));
+    BOOST_CHECK(compatible(graph, annotations, 9, 10));
+    BOOST_CHECK(compatible(graph, annotations, 10, 11));
+    BOOST_CHECK(compatible(graph, annotations, 11, 0));
 
     compressor.Compress(barrier_nodes,
                         traffic_lights,
                         scripting_environment,
                         restrictions,
                         conditional_restrictions,
+                        maneuver_overrides,
                         graph,
                         annotations,
                         container);
@@ -180,6 +186,7 @@ BOOST_AUTO_TEST_CASE(t_intersection)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     std::vector<InputEdge> edges = {MakeUnitEdge(0, 1),
                                     MakeUnitEdge(1, 0),
@@ -189,17 +196,18 @@ BOOST_AUTO_TEST_CASE(t_intersection)
                                     MakeUnitEdge(3, 1)};
 
     Graph graph(4, edges);
-    BOOST_ASSERT(compatible(graph, annotations, 0, 1));
-    BOOST_ASSERT(compatible(graph, annotations, 1, 2));
-    BOOST_ASSERT(compatible(graph, annotations, 2, 3));
-    BOOST_ASSERT(compatible(graph, annotations, 3, 4));
-    BOOST_ASSERT(compatible(graph, annotations, 4, 5));
+    BOOST_CHECK(compatible(graph, annotations, 0, 1));
+    BOOST_CHECK(compatible(graph, annotations, 1, 2));
+    BOOST_CHECK(compatible(graph, annotations, 2, 3));
+    BOOST_CHECK(compatible(graph, annotations, 3, 4));
+    BOOST_CHECK(compatible(graph, annotations, 4, 5));
 
     compressor.Compress(barrier_nodes,
                         traffic_lights,
                         scripting_environment,
                         restrictions,
                         conditional_restrictions,
+                        maneuver_overrides,
                         graph,
                         annotations,
                         container);
@@ -223,6 +231,7 @@ BOOST_AUTO_TEST_CASE(street_name_changes)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     std::vector<InputEdge> edges = {
         MakeUnitEdge(0, 1), MakeUnitEdge(1, 0), MakeUnitEdge(1, 2), MakeUnitEdge(2, 1)};
@@ -231,14 +240,15 @@ BOOST_AUTO_TEST_CASE(street_name_changes)
     edges[2].data.annotation_data = edges[3].data.annotation_data = 1;
 
     Graph graph(5, edges);
-    BOOST_ASSERT(compatible(graph, annotations, 0, 1));
-    BOOST_ASSERT(compatible(graph, annotations, 2, 3));
+    BOOST_CHECK(compatible(graph, annotations, 0, 1));
+    BOOST_CHECK(compatible(graph, annotations, 2, 3));
 
     compressor.Compress(barrier_nodes,
                         traffic_lights,
                         scripting_environment,
                         restrictions,
                         conditional_restrictions,
+                        maneuver_overrides,
                         graph,
                         annotations,
                         container);
@@ -261,6 +271,7 @@ BOOST_AUTO_TEST_CASE(direction_changes)
     std::vector<ConditionalTurnRestriction> conditional_restrictions;
     CompressedEdgeContainer container;
     test::MockScriptingEnvironment scripting_environment;
+    std::vector<UnresolvedManeuverOverride> maneuver_overrides;
 
     std::vector<InputEdge> edges = {
         MakeUnitEdge(0, 1), MakeUnitEdge(1, 0), MakeUnitEdge(1, 2), MakeUnitEdge(2, 1)};
@@ -273,6 +284,7 @@ BOOST_AUTO_TEST_CASE(direction_changes)
                         scripting_environment,
                         restrictions,
                         conditional_restrictions,
+                        maneuver_overrides,
                         graph,
                         annotations,
                         container);

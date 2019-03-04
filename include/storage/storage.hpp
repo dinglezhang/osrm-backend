@@ -28,26 +28,35 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #ifndef STORAGE_HPP
 #define STORAGE_HPP
 
+#include "storage/shared_data_index.hpp"
 #include "storage/shared_datatype.hpp"
 #include "storage/storage_config.hpp"
 
 #include <boost/filesystem/path.hpp>
 
 #include <string>
+#include <vector>
 
 namespace osrm
 {
 namespace storage
 {
+
+void populateLayoutFromFile(const boost::filesystem::path &path, storage::BaseDataLayout &layout);
+
 class Storage
 {
   public:
     Storage(StorageConfig config);
 
-    int Run(int max_wait);
-
-    void PopulateLayout(DataLayout &layout);
-    void PopulateData(const DataLayout &layout, char *memory_ptr);
+    int Run(int max_wait, const std::string &name, bool only_metric);
+    void PopulateStaticData(const SharedDataIndex &index);
+    void PopulateUpdatableData(const SharedDataIndex &index);
+    void PopulateLayout(storage::BaseDataLayout &layout,
+                        const std::vector<std::pair<bool, boost::filesystem::path>> &files);
+    std::string PopulateLayoutWithRTree(storage::BaseDataLayout &layout);
+    std::vector<std::pair<bool, boost::filesystem::path>> GetUpdatableFiles();
+    std::vector<std::pair<bool, boost::filesystem::path>> GetStaticFiles();
 
   private:
     StorageConfig config;

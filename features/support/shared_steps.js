@@ -75,6 +75,10 @@ module.exports = function () {
                             got.message = json.message || '';
                         }
 
+                        if (headers.has('data_version')) {
+                            got.data_version = json.data_version || '';
+                        }
+
                         if (headers.has('#')) {
                             // comment column
                             got['#'] = row['#'];
@@ -115,7 +119,7 @@ module.exports = function () {
 
                         if (headers.has('weight')) {
                             if (row.weight.length) {
-                                if (!row.weight.match(/[\d\.]+/))
+                                if (!row.weight.match(/[\d.]+/))
                                     return cb(new Error('*** Weight must be specified as a numeric value. (ex: 8)'));
                                 got.weight = instructions ? util.format('%d', weight) : '';
                             } else {
@@ -151,14 +155,15 @@ module.exports = function () {
                         if (headers.has('locations')){
                             got.locations = (locations || '').trim();
                         }
-/*
+                        /*
                         if (headers.has('approaches')){
                             got.approaches = (approaches || '').trim();
                         }*/
                         // if header matches 'a:*', parse out the values for *
                         // and return in that header
                         headers.forEach((k) => {
-                            let whitelist = ['duration', 'distance', 'datasources', 'nodes', 'weight', 'speed'];
+                            let whitelist = ['duration', 'distance', 'datasources', 'nodes', 'weight', 'speed' ];
+                            let metadata_whitelist = [ 'datasource_names' ];
                             if (k.match(/^a:/)) {
                                 let a_type = k.slice(2);
                                 if (whitelist.indexOf(a_type) == -1)
@@ -166,6 +171,13 @@ module.exports = function () {
                                 if (annotation && !annotation[a_type])
                                     return cb(new Error('Annotation not found in response', a_type));
                                 got[k] = annotation && annotation[a_type] || '';
+                            } else if (k.match(/^am:/)) {
+                                let a_type = k.slice(3);
+                                if (metadata_whitelist.indexOf(a_type) == -1)
+                                    return cb(new Error('Unrecognized annotation field', a_type));
+                                if (annotation && (!annotation.metadata || !annotation.metadata[a_type]))
+                                    return cb(new Error('Annotation not found in response', a_type));
+                                got[k] = (annotation && annotation.metadata && annotation.metadata[a_type]) || '';
                             }
                         });
 
